@@ -1,4 +1,7 @@
 # AgentQuant — Streamlit Community Cloud requirements
+# Install local package first so "from src.X import Y" resolves without sys.path hacks.
+.
+
 # Pinned to avoid dependency conflicts.
 # google-genai replaces google-generativeai; both langchain-google-genai>=2.0 and
 # google-genai>=1.0 share the same underlying google-ai-generativelanguage>=0.7.
