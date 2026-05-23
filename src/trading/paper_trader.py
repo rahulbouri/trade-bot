@@ -334,6 +334,57 @@ class PaperTrader:
             return pd.DataFrame(columns=columns)
         return pd.DataFrame(rows, columns=columns)
 
+    def get_transaction_history(self) -> pd.DataFrame:
+        """Return chronological ledger of every BUY and SELL event derived from existing tables."""
+        columns = ["date", "type", "ticker", "quantity", "price", "amount", "commission", "note"]
+        rows: List[Dict[str, Any]] = []
+
+        # Closed trades → emit a BUY row (entry) and a SELL row (exit)
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            trades = conn.execute(
+                "SELECT ticker, entry_date, exit_date, entry_price, exit_price, "
+                "quantity, pnl, cost_basis, exit_reason FROM trades ORDER BY entry_date"
+            ).fetchall()
+            open_pos = conn.execute(
+                "SELECT ticker, entry_date, entry_price, quantity, cost_basis, reason "
+                "FROM open_positions ORDER BY entry_date"
+            ).fetchall()
+
+        for t in trades:
+            buy_amount = -(t["quantity"] * t["entry_price"])
+            sell_amount = t["quantity"] * t["exit_price"]
+            commission = abs(buy_amount + sell_amount) * _COMMISSION_PCT
+            rows.append({
+                "date": t["entry_date"], "type": "BUY", "ticker": t["ticker"],
+                "quantity": t["quantity"], "price": t["entry_price"],
+                "amount": buy_amount, "commission": -abs(buy_amount) * _COMMISSION_PCT,
+                "note": "Position opened",
+            })
+            rows.append({
+                "date": t["exit_date"], "type": "SELL", "ticker": t["ticker"],
+                "quantity": t["quantity"], "price": t["exit_price"],
+                "amount": sell_amount, "commission": -abs(sell_amount) * _COMMISSION_PCT,
+                "note": t["exit_reason"],
+            })
+
+        # Open positions → emit pending BUY row
+        for p in open_pos:
+            rows.append({
+                "date": p["entry_date"], "type": "BUY", "ticker": p["ticker"],
+                "quantity": p["quantity"], "price": p["entry_price"],
+                "amount": -(p["quantity"] * p["entry_price"]),
+                "commission": -abs(p["cost_basis"] - p["quantity"] * p["entry_price"]),
+                "note": "Open position",
+            })
+
+        if not rows:
+            return pd.DataFrame(columns=columns)
+
+        df = pd.DataFrame(rows, columns=columns)
+        df = df.sort_values("date").reset_index(drop=True)
+        return df
+
     def get_performance_metrics(self, benchmark_returns: Optional[pd.Series] = None) -> Dict[str, Any]:
         """Compute portfolio performance from closed trades."""
         df = self.get_trade_history()

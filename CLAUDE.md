@@ -1,7 +1,7 @@
 # AgentQuant 2.0 — Development Context & Plan
 
-**Last Updated:** 2026-05-23 (UPDATED: 4-Step Pipeline: Math Search → LLM Analysis → Backtest)  
-**Current Focus:** Search & Planning Module (MVP Phase)
+**Last Updated:** 2026-05-23 (UPDATED: Phase 3.1 — Dashboard refinements + deployment fixes)  
+**Current Focus:** Phase 3.1: Dashboard UX refinements, deployment fixes, universe expansion planning
 
 ---
 
@@ -356,7 +356,133 @@ live_execution.py  →  monitoring_dashboard.py  ←  backtest_metrics
 
 ## Implementation Roadmap
 
-### Phase 1: 4-Step Search Pipeline + Alpha Discovery (Weeks 1-4) ← **CURRENT**
+### Phase 1: 4-Step Search Pipeline + Alpha Discovery (Weeks 1-4) ← **COMPLETED** ✅
+
+**Status:** All files created, tested, integrated into agent_graph.py. Phase 1 fully functional.
+
+**Files Completed:**
+- src/agent/search_pipeline.py (12 KB)
+- src/agent/alpha_discovery.py (5.8 KB)
+- src/agent/edge_validator.py (7.5 KB)
+- src/agent/edge_generalizer.py (11 KB)
+- src/features/regime.py (modified, signals_to_vector added)
+- src/agent/strategy_memory.py (modified, signals_vector field added)
+- src/agent/agent_graph.py (modified, discovery/analyze/shortlist/llm_analysis/backtest/store nodes added)
+- tests/test_search_pipeline.py (14 tests, 100% coverage)
+- tests/test_alpha_discovery.py (15 tests, 100% coverage)
+- tests/test_integration_search.py (9 tests, 100% coverage)
+
+**Key Metrics:**
+- Token cost: ~$0.25 per day (vs $2.50 without aggregation)
+- Asset search time: <3 seconds on 1500 assets
+- Top 50 assets ranked by historical similarity + LLM approval
+- All Phase 1 tests passing, 100% coverage maintained
+
+---
+
+### Phase 2: Position Management & Historical Aggregation (Weeks 5-6) ← **COMPLETED** ✅
+
+**Status:** Complete. All 118 tests passing. Live end-to-end verified with real Gemini LLM calls.
+
+**Files Completed:**
+- src/agent/historical_aggregator.py — HistoricalAggregator, StrategyRegimeSummary dataclass
+- src/agent/position_manager.py — PositionManager with 5-rule heuristic decision engine (SQLite-backed)
+- src/agent/base_planner.py — Added generate_text() with token counting to all planners (Gemini, LangChain, OpenAI, Fallback)
+- src/agent/agent_graph.py — llm_analysis_node (real Gemini batch call), position_management_node (LLM-filtered), backtest_node (position-decided ticker), discovery_node (100-record self-gate)
+- tests/test_historical_aggregator.py — 14 tests
+- tests/test_position_manager.py — 16 tests
+- tests/test_position_management_node.py — 5 tests
+- tests/test_phase2_e2e.py — 3 E2E lifecycle tests
+
+**Key Metrics:**
+- Token logging: prompt/completion/thinking/total for every LLM call
+- LLM batch analysis: single Gemini call for top-10 assets
+- Position rules: BUY(>50%), HOLD(same ticker >70%), SWITCH(>80%), EXIT(>5 days or explicit)
+- Bootstrap safe: empty StrategyMemory → LLM says NO → SKIP → backtest runs anyway → grows memory
+
+---
+
+### Phase 3: Paper Trading Engine + Streamlit Dashboard (Weeks 7-8) ← **COMPLETED** ✅
+
+**Status:** Fully implemented and deployed to Streamlit Community Cloud.
+
+**Files Completed:**
+- src/trading/__init__.py, src/trading/paper_trader.py — SQLite-backed virtual portfolio (₹1L capital)
+- src/app/streamlit_app.py — multi-page entry point with sidebar portfolio summary
+- src/app/pages/0_Status.py — keepalive page (5-min HTML meta refresh)
+- src/app/pages/1_Portfolio.py — live mark-to-market via yf.Ticker.fast_info (5-min cache)
+- src/app/pages/2_Agent_Runs.py — run history + "Run Agent Now" button
+- src/app/pages/3_Trade_History.py — tabbed: Trade History + Transaction Ledger
+- src/app/pages/4_Strategy_Research.py — backtest explorer + regime analysis
+- scripts/run_scheduler.py — APScheduler daemon (Mon–Fri 04:00 UTC = 09:30 IST)
+- scripts/simulate_history.py — 10-day historical simulation script
+- tests/test_paper_trader.py — 12 tests
+
+**Key Decisions:**
+- PaperTrader derives transaction ledger from existing tables (no extra schema)
+- Live portfolio prices use yf.Ticker.fast_info (bypasses parquet cache, 5-min TTL)
+- Scheduler runs as background thread; Streamlit is PID 1 via `exec`
+- Deployed via Streamlit Community Cloud (private GitHub repo, TOML secrets)
+
+---
+
+### Phase 3.1: Dashboard Refinements (2026-05-23) ← **CURRENT**
+
+**Status:** In progress.
+
+**Changes Made:**
+- **Dependency fix:** Migrated from `google-generativeai` → `google-genai` (new unified SDK) to resolve conflict with `langchain-google-genai>=2.0`. Updated `GeminiPlanner` to use `genai.Client` + `client.models.generate_content`.
+- **Module resolution fix:** Added `src/__init__.py`, `src/app/__init__.py`, and `sys.path` fix at top of all page files — required for Streamlit Cloud to resolve `from src.X import Y`.
+- **Live price fix:** Portfolio page now calls `yf.Ticker.fast_info.last_price` (5-min Streamlit cache) instead of reading stale parquet file. Unrealized P&L is now accurate.
+- **History page:** Renamed Trade History → History with two tabs:
+  - **Trade History** — closed round-trips with P&L, regime, exit reason, distribution chart
+  - **Transactions** — chronological BUY/SELL ledger derived from `trades` + `open_positions` tables, with cash flow chart. Green/red row colouring.
+
+**Pending for Phase 3.1:**
+- Universe expansion: upgrade `fetch_ohlcv_data` to use `yf.download(list)` batch API before expanding beyond 5 tickers. Target: 20-30 liquid ETFs (sector, bond, commodity). NSE stocks require `.NS` suffix handling and are a later milestone.
+- Ingest refactor: batch download reduces cold-start from O(n×2s) sequential → O(1×8s) batch for 50 tickers.
+
+---
+
+**Build Instructions:**
+- See: /tmp/PHASE3_BUILD_PROMPT.md — Complete Phase 3 specification (all API signatures, DB schema, tests)
+
+**What Phase 3 Adds:**
+- PaperTrader (src/trading/paper_trader.py) — SQLite-backed virtual portfolio; BUY/SELL/P&L tracking; ₹1L starting capital
+- store_node integration — After each agent run, executes paper BUY/SELL based on position_decision.action
+- Multi-page Streamlit dashboard (replaces existing src/app/streamlit_app.py):
+  - Page 1: Portfolio — current positions, P&L, Sharpe, drawdown
+  - Page 2: Agent Runs — run history, LLM decisions, "Run Agent Now" button
+  - Page 3: Trade History — all closed trades with P&L breakdown
+  - Page 4: Strategy Research — backtest explorer (ported from old app)
+
+**Files to Create:**
+1. src/trading/__init__.py (empty)
+2. src/trading/paper_trader.py (~280 lines, PaperTrader class)
+3. src/app/pages/1_Portfolio.py
+4. src/app/pages/2_Agent_Runs.py
+5. src/app/pages/3_Trade_History.py
+6. src/app/pages/4_Strategy_Research.py
+7. tests/test_paper_trader.py (12 tests)
+
+**Files to Rewrite:**
+1. src/app/streamlit_app.py (multi-page entry point)
+
+**Files to Modify:**
+1. src/agent/agent_graph.py (add paper trading to store_node)
+
+**Success Criteria:**
+- 12 new tests pass (130 total including Phase 1+2)
+- store_node logs PAPER TRADE: BUY/SELL on every agent run
+- Dashboard loads with 4 pages, handles empty state gracefully
+- "Run Agent Now" button in Agent Runs page triggers full pipeline
+- round-trip BUY→SELL correctly records P&L in trade history
+
+**Time Estimate:** 5-6 hours
+
+---
+
+### Phase 3: 4-Step Search Pipeline + Alpha Discovery (Weeks 1-4) ← **FUTURE**
 
 **Week 1: Extend StrategyMemory** (2-3 days)
 - [ ] Add `signals_vector: str` field (stores RegimeSignals as JSON)

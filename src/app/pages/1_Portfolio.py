@@ -47,16 +47,17 @@ open_positions = snap["open_positions"]
 if not open_positions:
     st.info("No open positions. Run the agent to generate trades.")
 else:
-    # Fetch current prices for mark-to-market
-    @st.cache_data(ttl=3600, show_spinner="Fetching current prices…")
+    # Fetch current prices for mark-to-market — bypass parquet cache, use live quote
+    @st.cache_data(ttl=300, show_spinner="Fetching live prices…")
     def _get_current_prices(tickers: tuple):
-        from src.data.ingest import fetch_ohlcv_data
+        import yfinance as yf
         prices = {}
         for ticker in tickers:
             try:
-                data = fetch_ohlcv_data(ticker)
-                if ticker in data and not data[ticker].empty:
-                    prices[ticker] = float(data[ticker]["Close"].iloc[-1])
+                info = yf.Ticker(ticker).fast_info
+                price = getattr(info, "last_price", None) or getattr(info, "previous_close", None)
+                if price:
+                    prices[ticker] = float(price)
             except Exception:
                 pass
         return prices
