@@ -1,6 +1,13 @@
 # Environment & secrets
 .env
+.env.local
+.env.*.local
 *.ini
+
+# Claude Code & MCP (local access tokens, intrinsic config)
+.mcp.json
+.claude/
+*.mcp
 
 # Python
 __pycache__/
@@ -18,6 +25,13 @@ data_store/*.parquet
 figures/
 experiments/*.csv
 experiments/*.db
+
+# Credentials & tokens (if accidentally created)
+credentials.json
+tokens.json
+*.key
+*.pem
+.secrets/
 
 # IDE
 .vscode/
