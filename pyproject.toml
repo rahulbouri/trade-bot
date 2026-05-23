@@ -28,9 +28,9 @@ dependencies = [
 
 [project.optional-dependencies]
 llm = [
-    "google-generativeai>=0.8",
+    "google-genai>=1.0",
     "langchain>=0.2",
-    "langchain-google-genai>=1.0",
+    "langchain-google-genai>=2.0",
     "langchain-core>=0.1",
     "langgraph>=0.0.69",
     "openai>=1.0",

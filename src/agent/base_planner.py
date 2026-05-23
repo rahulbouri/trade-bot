@@ -60,32 +60,33 @@ class BasePlanner(ABC):
 
 
 class GeminiPlanner(BasePlanner):
-    """Google Gemini implementation via google-generativeai SDK."""
+    """Google Gemini implementation via google-genai SDK."""
 
     def __init__(self):
         self._api_key = os.getenv("GOOGLE_API_KEY", "")
         self._model_name = config.llm.model
         self._temperature = config.llm.temperature
-        self._model = None
+        self._client = None
 
     def is_available(self) -> bool:
         return bool(self._api_key and self._api_key not in ("", "your_gemini_api_key_here", "you api key"))
 
-    def _get_model(self):
-        if self._model is None:
-            import google.generativeai as genai
-            genai.configure(api_key=self._api_key)
-            self._model = genai.GenerativeModel(
-                model_name=self._model_name,
-                generation_config={"temperature": self._temperature},
-            )
-        return self._model
+    def _get_client(self):
+        if self._client is None:
+            import google.genai as genai
+            self._client = genai.Client(api_key=self._api_key)
+        return self._client
 
     def generate_text(self, prompt: str) -> Tuple[str, TokenCounts]:
         """Generate free-form text, return (text, token_counts)."""
-        model = self._get_model()
-        response = model.generate_content(prompt)
-        text = response.text.strip() if hasattr(response, "text") else ""
+        import google.genai as _genai
+        client = self._get_client()
+        response = client.models.generate_content(
+            model=self._model_name,
+            contents=prompt,
+            config=_genai.types.GenerateContentConfig(temperature=self._temperature),
+        )
+        text = response.text.strip() if hasattr(response, "text") and response.text else ""
 
         usage = getattr(response, "usage_metadata", None)
         if usage:
