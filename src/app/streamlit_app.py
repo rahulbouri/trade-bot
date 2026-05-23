@@ -1,5 +1,13 @@
 """AgentQuant Dashboard — Paper Trading Monitor."""
 
+import sys
+from pathlib import Path
+
+# Ensure repo root is on sys.path so "from src.X import Y" works on Streamlit Cloud
+_repo_root = Path(__file__).parent.parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
 import streamlit as st
 
 st.set_page_config(

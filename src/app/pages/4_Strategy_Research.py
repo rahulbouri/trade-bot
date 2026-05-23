@@ -1,5 +1,11 @@
 """Strategy Research page — regime detection, backtest explorer, strategy memory browser."""
 
+import sys
+from pathlib import Path
+_repo_root = Path(__file__).parent.parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
 import logging
 from datetime import datetime, timedelta
 
