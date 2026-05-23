@@ -33,12 +33,17 @@ if runner_state["running"]:
 else:
     col_btn, _ = st.columns([1, 3])
     with col_btn:
-        if st.button("Run Agent Now", type="primary", use_container_width=True):
-            fired = start_agent_run()
-            if fired:
-                st.rerun()
-            else:
-                st.warning("Agent is already running.")
+        clicked = st.button("Run Agent Now", type="primary", use_container_width=True)
+
+    # Guard: only fire on the *first* rerun after the click, not on subsequent reruns.
+    # st.button returns True on the rerun immediately following the click; session state
+    # prevents a second fire if the page reruns again before the thread sets running=True.
+    if clicked and not st.session_state.get("_agent_just_fired"):
+        st.session_state["_agent_just_fired"] = True
+        start_agent_run()
+        st.rerun()
+    elif not clicked:
+        st.session_state.pop("_agent_just_fired", None)
 
     # Show result of last run
     if runner_state["completed_at"]:

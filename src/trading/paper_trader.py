@@ -344,7 +344,7 @@ class PaperTrader:
             conn.row_factory = sqlite3.Row
             trades = conn.execute(
                 "SELECT ticker, entry_date, exit_date, entry_price, exit_price, "
-                "quantity, pnl, cost_basis, exit_reason FROM trades ORDER BY entry_date"
+                "quantity, pnl, exit_reason FROM trades ORDER BY entry_date"
             ).fetchall()
             open_pos = conn.execute(
                 "SELECT ticker, entry_date, entry_price, quantity, cost_basis, reason "
@@ -352,29 +352,28 @@ class PaperTrader:
             ).fetchall()
 
         for t in trades:
-            buy_amount = -(t["quantity"] * t["entry_price"])
-            sell_amount = t["quantity"] * t["exit_price"]
-            commission = abs(buy_amount + sell_amount) * _COMMISSION_PCT
+            buy_gross = t["quantity"] * t["entry_price"]
+            sell_gross = t["quantity"] * t["exit_price"]
             rows.append({
                 "date": t["entry_date"], "type": "BUY", "ticker": t["ticker"],
                 "quantity": t["quantity"], "price": t["entry_price"],
-                "amount": buy_amount, "commission": -abs(buy_amount) * _COMMISSION_PCT,
+                "amount": -buy_gross, "commission": -(buy_gross * _COMMISSION_PCT),
                 "note": "Position opened",
             })
             rows.append({
                 "date": t["exit_date"], "type": "SELL", "ticker": t["ticker"],
                 "quantity": t["quantity"], "price": t["exit_price"],
-                "amount": sell_amount, "commission": -abs(sell_amount) * _COMMISSION_PCT,
+                "amount": sell_gross, "commission": -(sell_gross * _COMMISSION_PCT),
                 "note": t["exit_reason"],
             })
 
         # Open positions → emit pending BUY row
         for p in open_pos:
+            gross = p["quantity"] * p["entry_price"]
             rows.append({
                 "date": p["entry_date"], "type": "BUY", "ticker": p["ticker"],
                 "quantity": p["quantity"], "price": p["entry_price"],
-                "amount": -(p["quantity"] * p["entry_price"]),
-                "commission": -abs(p["cost_basis"] - p["quantity"] * p["entry_price"]),
+                "amount": -gross, "commission": -(gross * _COMMISSION_PCT),
                 "note": "Open position",
             })
 
