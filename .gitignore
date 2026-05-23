@@ -43,6 +43,11 @@ tokens.json
 .DS_Store
 Thumbs.db
 
+# Phase 2: Position Manager cache
+.cache/
+.cache/position_manager.db
+.cache/historical_summaries.json
+
 # Legacy config (standardized to config.yaml)
 config.json
 new_env.ini

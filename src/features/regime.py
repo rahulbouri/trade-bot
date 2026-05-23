@@ -153,6 +153,40 @@ def detect_regime_full(features_df: pd.DataFrame) -> RegimeSignals:
     return signals
 
 
+def signals_to_vector(signals: RegimeSignals) -> np.ndarray:
+    """
+    Convert RegimeSignals object to normalized [0, 1] vector for distance calculations.
+
+    Vector components (order matters):
+    [
+        vix_percentile / 100.0,                    # [0, 1]
+        (momentum_63d + 0.5) / 1.0,                # Normalize [-0.5, 0.5] → [0, 1]
+        realized_vol_21d / 0.5,                    # Normalize [0, 0.5] → [0, 1] (clip to 1.0)
+        (drawdown_from_52w_high + 1.0),            # Normalize [-1, 0] → [0, 1]
+        (price_vs_200sma_pct + 0.5) / 1.0,         # Normalize [-0.5, 0.5] → [0, 1]
+        vol_regime_ordinal / 3.0,                  # low=0, mid=1, high=2, crisis=3 → [0, 1]
+    ]
+
+    Each component clipped to [0, 1] range.
+
+    Returns:
+        np.ndarray of shape (6,) with values in [0, 1]
+    """
+    vol_regime_map = {"low": 0.0, "mid": 1.0, "high": 2.0, "crisis": 3.0}
+    vol_ordinal = vol_regime_map.get(signals.vol_regime, 1.0)
+
+    vector = np.array([
+        signals.vix_percentile_252d / 100.0,
+        (signals.momentum_63d + 0.5) / 1.0,
+        signals.realized_vol_21d / 0.5,
+        signals.drawdown_from_52w_high + 1.0,
+        (signals.price_vs_200sma_pct + 0.5) / 1.0,
+        vol_ordinal / 3.0,
+    ], dtype=np.float32)
+
+    return np.clip(vector, 0.0, 1.0)
+
+
 def _try_hmm_regime(features_df: pd.DataFrame, n_states: int = 3) -> Optional[str]:
     """
     Attempt HMM-based regime detection. Returns regime label or None if unavailable.

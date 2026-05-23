@@ -1,0 +1,15 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "/start.sh"
+healthcheckPath = "/_stcore/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# Railway injects PORT automatically — no need to set it here.
+# Add environment variables in the Railway dashboard:
+#   GEMINI_API_KEY  — required for LLM calls
+#   OPENAI_API_KEY  — optional fallback

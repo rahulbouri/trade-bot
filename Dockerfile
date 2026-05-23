@@ -1,39 +1,37 @@
-FROM python:3.11-slim
+FROM python:3.10-slim
 
-LABEL maintainer="AgentQuant Team"
-LABEL description="AgentQuant — Autonomous Quantitative Research Platform"
+LABEL maintainer="AgentQuant"
+LABEL description="AgentQuant — AI Paper Trading Dashboard + Daily Scheduled Agent"
 
 WORKDIR /app
 
-# Install OS-level dependencies (for scipy/numpy native extensions)
+# ── System deps (scipy / numpy native extensions) ─────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    git \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency spec first (layer caching)
+# ── Python deps (layer-cached until pyproject.toml changes) ───────────────────
 COPY pyproject.toml ./
 
-# Install core + llm + data optional groups
-RUN pip install --no-cache-dir -e ".[llm,data]"
+# Install all groups needed in production: core + llm + regime
+# 'data' group (fredapi, alpaca) is optional; skip to keep image lean
+RUN pip install --no-cache-dir -e ".[llm,regime]"
 
-# Copy source code
+# ── Copy source ────────────────────────────────────────────────────────────────
 COPY . .
 
-# Ensure data_store and experiments directories exist
-RUN mkdir -p data_store experiments figures
+# ── Persistent data directories (overridden by mounted volumes in prod) ────────
+RUN mkdir -p .cache experiments data_store figures
 
-# Streamlit port
+# ── Entrypoint script ──────────────────────────────────────────────────────────
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
+# ── Streamlit port (Railway injects PORT at runtime) ──────────────────────────
 EXPOSE 8501
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD python -c "import src.utils.config" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8501}/_stcore/health || exit 1
 
-# Default: run the Streamlit dashboard
-# Override CMD to run the agent instead: docker run agentquant python -m src.agent.runner
-CMD ["streamlit", "run", "src/app/streamlit_app.py", \
-     "--server.port=8501", \
-     "--server.address=0.0.0.0", \
-     "--server.headless=true", \
-     "--browser.gatherUsageStats=false"]
+ENTRYPOINT ["/start.sh"]

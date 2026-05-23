@@ -1,0 +1,39 @@
+# Secrets — never bake into image
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+
+# Dev artifacts
+.git/
+.github/
+.claude/
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local data (downloaded fresh at runtime or mounted as volumes)
+.cache/
+data_store/*.parquet
+experiments/*.db
+
+# Notebooks / docs (not needed at runtime)
+notebooks/
+docs/
+screenshots/
+figures/
+
+# Test files (not needed at runtime)
+tests/
+
+# Local dev scripts
+scripts/simulate_history.py

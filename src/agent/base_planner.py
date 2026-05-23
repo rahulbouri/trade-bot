@@ -4,13 +4,19 @@ Base Planner — LLM Abstraction Layer
 
 Provides BasePlanner ABC with concrete implementations for Gemini, OpenAI, and
 fallback (no-LLM) planners. Factory function reads provider from config.
+
+All planners expose:
+  - generate_proposals(prompt, n) → List[Dict]   (structured param proposals)
+  - generate_text(prompt)         → (str, TokenCounts)  (free-form text + token counts)
+
+TokenCounts = {prompt_tokens, completion_tokens, thinking_tokens, total_tokens}
 """
 
 import json
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
@@ -20,22 +26,30 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+# Type alias for clarity
+TokenCounts = Dict[str, int]
+
+
+def _empty_tokens() -> TokenCounts:
+    return {"prompt_tokens": 0, "completion_tokens": 0, "thinking_tokens": 0, "total_tokens": 0}
+
 
 class BasePlanner(ABC):
     """Abstract interface for LLM-based strategy proposal generation."""
 
     @abstractmethod
-    def generate_proposals(
-        self,
-        prompt: str,
-        n: int = 5,
-    ) -> List[Dict[str, Any]]:
+    def generate_proposals(self, prompt: str, n: int = 5) -> List[Dict[str, Any]]:
+        """Send prompt to LLM, parse and return JSON proposal list."""
+        ...
+
+    @abstractmethod
+    def generate_text(self, prompt: str) -> Tuple[str, TokenCounts]:
         """
-        Send a structured prompt to the LLM and parse JSON responses.
+        Send prompt to LLM, return raw text response and token usage.
 
         Returns:
-            List of dicts, each with at least: fast_window, slow_window,
-            reasoning, confidence, regime_characteristic_used.
+            (text, token_counts) where token_counts has keys:
+            prompt_tokens, completion_tokens, thinking_tokens, total_tokens
         """
         ...
 
@@ -67,32 +81,68 @@ class GeminiPlanner(BasePlanner):
             )
         return self._model
 
-    def generate_proposals(self, prompt: str, n: int = 5) -> List[Dict[str, Any]]:
+    def generate_text(self, prompt: str) -> Tuple[str, TokenCounts]:
+        """Generate free-form text, return (text, token_counts)."""
         model = self._get_model()
         response = model.generate_content(prompt)
+        text = response.text.strip() if hasattr(response, "text") else ""
 
-        text = response.text.strip()
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            prompt_tokens = getattr(usage, "prompt_token_count", 0) or 0
+            completion_tokens = getattr(usage, "candidates_token_count", 0) or 0
+            total_tokens = getattr(usage, "total_token_count", 0) or 0
+            # gemini-2.5-flash includes thinking tokens in total
+            thinking_tokens = max(0, total_tokens - prompt_tokens - completion_tokens)
+            token_counts: TokenCounts = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "thinking_tokens": thinking_tokens,
+                "total_tokens": total_tokens,
+            }
+        else:
+            token_counts = _empty_tokens()
+
+        logger.debug(
+            "Gemini [%s] tokens — prompt: %d, completion: %d, thinking: %d, total: %d",
+            self._model_name,
+            token_counts["prompt_tokens"],
+            token_counts["completion_tokens"],
+            token_counts["thinking_tokens"],
+            token_counts["total_tokens"],
+        )
+        return text, token_counts
+
+    def generate_proposals(self, prompt: str, n: int = 5) -> List[Dict[str, Any]]:
+        """Generate strategy proposals. Internally uses generate_text."""
+        text, token_counts = self.generate_text(prompt)
+        logger.info(
+            "LLM TOKENS [generate_proposals | %s]: prompt=%d  completion=%d  thinking=%d  total=%d",
+            self._model_name,
+            token_counts["prompt_tokens"],
+            token_counts["completion_tokens"],
+            token_counts["thinking_tokens"],
+            token_counts["total_tokens"],
+        )
         return self._parse_json_response(text, n)
 
     def _parse_json_response(self, text: str, n: int) -> List[Dict[str, Any]]:
         """Extract JSON array from LLM response text."""
-        # Try to find JSON array in response
         start = text.find("[")
         end = text.rfind("]")
         if start != -1 and end != -1:
             try:
-                proposals = json.loads(text[start : end + 1])
+                proposals = json.loads(text[start:end + 1])
                 if isinstance(proposals, list):
                     return proposals[:n]
             except json.JSONDecodeError:
                 pass
 
-        # Try single JSON object
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end != -1:
             try:
-                obj = json.loads(text[start : end + 1])
+                obj = json.loads(text[start:end + 1])
                 if isinstance(obj, dict):
                     return [obj]
             except json.JSONDecodeError:
@@ -119,16 +169,51 @@ class LangChainPlanner(BasePlanner):
         except ImportError:
             return False
 
-    def generate_proposals(self, prompt: str, n: int = 5) -> List[Dict[str, Any]]:
+    def _get_llm(self):
         from langchain_google_genai import ChatGoogleGenerativeAI
-
-        llm = ChatGoogleGenerativeAI(
+        return ChatGoogleGenerativeAI(
             model=self._model_name,
             temperature=self._temperature,
             max_retries=config.llm.max_retries,
         )
+
+    def generate_text(self, prompt: str) -> Tuple[str, TokenCounts]:
+        """Generate free-form text via LangChain, return (text, token_counts)."""
+        llm = self._get_llm()
         response = llm.invoke(prompt)
         text = response.content if hasattr(response, "content") else str(response)
+
+        usage = getattr(response, "usage_metadata", {}) or {}
+        prompt_tokens = usage.get("input_tokens", 0) or 0
+        completion_tokens = usage.get("output_tokens", 0) or 0
+        total_tokens = usage.get("total_tokens", 0) or 0
+        thinking_tokens = max(0, total_tokens - prompt_tokens - completion_tokens)
+        token_counts: TokenCounts = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "thinking_tokens": thinking_tokens,
+            "total_tokens": total_tokens,
+        }
+        logger.debug(
+            "LangChain [%s] tokens — prompt: %d, completion: %d, thinking: %d, total: %d",
+            self._model_name,
+            token_counts["prompt_tokens"],
+            token_counts["completion_tokens"],
+            token_counts["thinking_tokens"],
+            token_counts["total_tokens"],
+        )
+        return text, token_counts
+
+    def generate_proposals(self, prompt: str, n: int = 5) -> List[Dict[str, Any]]:
+        text, token_counts = self.generate_text(prompt)
+        logger.info(
+            "LLM TOKENS [generate_proposals | %s]: prompt=%d  completion=%d  thinking=%d  total=%d",
+            self._model_name,
+            token_counts["prompt_tokens"],
+            token_counts["completion_tokens"],
+            token_counts["thinking_tokens"],
+            token_counts["total_tokens"],
+        )
         return GeminiPlanner._parse_json_response(None, text, n)
 
 
@@ -147,9 +232,8 @@ class OpenAIPlanner(BasePlanner):
         except ImportError:
             return False
 
-    def generate_proposals(self, prompt: str, n: int = 5) -> List[Dict[str, Any]]:
+    def generate_text(self, prompt: str) -> Tuple[str, TokenCounts]:
         import openai
-
         client = openai.OpenAI(api_key=self._api_key)
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -157,6 +241,29 @@ class OpenAIPlanner(BasePlanner):
             temperature=config.llm.temperature,
         )
         text = response.choices[0].message.content or ""
+        usage = response.usage
+        token_counts: TokenCounts = {
+            "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+            "completion_tokens": getattr(usage, "completion_tokens", 0),
+            "thinking_tokens": 0,
+            "total_tokens": getattr(usage, "total_tokens", 0),
+        }
+        logger.debug(
+            "OpenAI tokens — prompt: %d, completion: %d, total: %d",
+            token_counts["prompt_tokens"],
+            token_counts["completion_tokens"],
+            token_counts["total_tokens"],
+        )
+        return text, token_counts
+
+    def generate_proposals(self, prompt: str, n: int = 5) -> List[Dict[str, Any]]:
+        text, token_counts = self.generate_text(prompt)
+        logger.info(
+            "LLM TOKENS [generate_proposals | gpt-4o-mini]: prompt=%d  completion=%d  total=%d",
+            token_counts["prompt_tokens"],
+            token_counts["completion_tokens"],
+            token_counts["total_tokens"],
+        )
         return GeminiPlanner._parse_json_response(None, text, n)
 
 
@@ -165,6 +272,10 @@ class FallbackPlanner(BasePlanner):
 
     def is_available(self) -> bool:
         return True
+
+    def generate_text(self, prompt: str) -> Tuple[str, TokenCounts]:
+        logger.info("FallbackPlanner: no LLM available, returning empty text.")
+        return "", _empty_tokens()
 
     def generate_proposals(self, prompt: str, n: int = 5) -> List[Dict[str, Any]]:
         logger.info("FallbackPlanner: no LLM available, returning empty proposals.")
@@ -182,7 +293,7 @@ def create_planner(provider: Optional[str] = None) -> BasePlanner:
     planners = {
         "gemini": [LangChainPlanner, GeminiPlanner],
         "openai": [OpenAIPlanner],
-        "ollama": [FallbackPlanner],  # placeholder for future Ollama support
+        "ollama": [FallbackPlanner],
     }
 
     candidates = planners.get(provider, [GeminiPlanner, OpenAIPlanner])

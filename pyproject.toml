@@ -21,6 +21,9 @@ dependencies = [
     "tabulate>=0.9",
     "statsmodels>=0.14",
     "requests>=2.31",
+    "apscheduler>=3.10",
+    "pytz>=2024.1",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]

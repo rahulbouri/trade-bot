@@ -34,6 +34,7 @@ class PastResult:
     confidence: float = 0.0
     generation_method: str = ""
     reasoning: str = ""
+    signals_vector: str = ""  # JSON string of RegimeSignals
 
 
 class StrategyMemory:
@@ -58,9 +59,15 @@ class StrategyMemory:
                     max_drawdown REAL DEFAULT 0.0,
                     confidence REAL DEFAULT 0.0,
                     generation_method TEXT DEFAULT '',
-                    reasoning TEXT DEFAULT ''
+                    reasoning TEXT DEFAULT '',
+                    signals_vector TEXT DEFAULT ''
                 )
             """)
+            # Add signals_vector column if it doesn't exist (migration)
+            try:
+                conn.execute("ALTER TABLE strategy_runs ADD COLUMN signals_vector TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
     def store(self, result: PastResult) -> str:
         """Store a strategy result. Returns the run_id."""
@@ -74,13 +81,13 @@ class StrategyMemory:
                 """INSERT OR REPLACE INTO strategy_runs
                    (run_id, timestamp, regime, strategy_type, params,
                     sharpe, total_return, max_drawdown, confidence,
-                    generation_method, reasoning)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    generation_method, reasoning, signals_vector)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     result.run_id, result.timestamp, result.regime,
                     result.strategy_type, result.params, result.sharpe,
                     result.total_return, result.max_drawdown, result.confidence,
-                    result.generation_method, result.reasoning,
+                    result.generation_method, result.reasoning, result.signals_vector,
                 ),
             )
         logger.debug("Stored result %s (regime=%s, sharpe=%.2f)", result.run_id, result.regime, result.sharpe)
@@ -124,3 +131,16 @@ class StrategyMemory:
                 f"Method={r.generation_method}"
             )
         return "\n".join(lines)
+
+    def _deserialize_signals(self, signals_json: str) -> Optional[Dict[str, Any]]:
+        """
+        Convert JSON string back to RegimeSignals dict.
+
+        Returns None if JSON is invalid or empty.
+        """
+        if not signals_json:
+            return None
+        try:
+            return json.loads(signals_json)
+        except (json.JSONDecodeError, TypeError):
+            return None
