@@ -27,7 +27,14 @@ Welcome to AgentQuant. Use the sidebar to navigate:
 - **Strategy Research** — Backtest explorer and regime analysis
 """)
 
+from src.app.background_runner import get_state as _get_runner_state
 from src.trading.paper_trader import PaperTrader
+
+# Agent running indicator — visible on every page via the sidebar
+_runner = _get_runner_state()
+if _runner["running"]:
+    st.sidebar.warning("Agent running...")
+
 try:
     pt = PaperTrader()
     snap = pt.get_portfolio_snapshot()

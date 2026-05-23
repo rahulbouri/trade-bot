@@ -1,7 +1,9 @@
 """Agent Runs page — run history, LLM reasoning, Run Agent Now button."""
 
 import sys
+import time
 from pathlib import Path
+
 _repo_root = Path(__file__).parent.parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
@@ -11,6 +13,7 @@ import json
 import pandas as pd
 import streamlit as st
 
+from src.app.background_runner import get_state, is_running, start_agent_run
 from src.trading.paper_trader import PaperTrader
 
 st.set_page_config(page_title="Agent Runs — AgentQuant", layout="wide")
@@ -18,29 +21,34 @@ st.title("Agent Run History")
 
 # ── Run Agent button ──────────────────────────────────────────────────────────
 st.subheader("Run Agent")
-col_btn, _ = st.columns([1, 3])
-with col_btn:
-    if st.button("🚀 Run Agent Now", type="primary", use_container_width=True):
-        with st.spinner("Running agent — this takes ~30 seconds..."):
-            try:
-                from dotenv import load_dotenv
-                from src.agent.agent_graph import run_agent
-                from src.data.ingest import fetch_ohlcv_data
-                from src.utils.config import config
 
-                load_dotenv()
-                ohlcv_data = fetch_ohlcv_data()
-                strategy_type = config.strategies[0].name if config.strategies else "momentum"
-                state = run_agent(
-                    ohlcv_data=ohlcv_data,
-                    strategy_type=strategy_type,
-                    asset=config.reference_asset,
-                )
-                action = state.get("position_decision", {}).get("action", "N/A")
-                st.success(f"Agent run complete! Action: {action}")
-            except Exception as e:
-                st.error(f"Agent run failed: {e}")
-        st.rerun()
+runner_state = get_state()
+
+if runner_state["running"]:
+    started = runner_state.get("started_at", "")
+    st.warning(f"Agent is running... (started {started} UTC). You can switch pages freely.")
+    # Auto-refresh this page every 5s while the agent is running
+    time.sleep(5)
+    st.rerun()
+else:
+    col_btn, _ = st.columns([1, 3])
+    with col_btn:
+        if st.button("Run Agent Now", type="primary", use_container_width=True):
+            fired = start_agent_run()
+            if fired:
+                st.rerun()
+            else:
+                st.warning("Agent is already running.")
+
+    # Show result of last run
+    if runner_state["completed_at"]:
+        if runner_state["error"]:
+            st.error(f"Last run failed at {runner_state['completed_at']} UTC: {runner_state['error']}")
+        else:
+            st.success(
+                f"Last run completed at {runner_state['completed_at']} UTC — "
+                f"Action: **{runner_state['action']}**"
+            )
 
 st.divider()
 
@@ -64,7 +72,6 @@ else:
     for _, row in runs_df.head(10).iterrows():
         label = f"{row['timestamp']} — {row['action']} {row.get('ticker', 'N/A')} (Sharpe {float(row['sharpe']):.3f})"
         with st.expander(label):
-            # Run log
             st.markdown("**Run Log**")
             try:
                 log_lines = json.loads(row["run_log"]) if isinstance(row["run_log"], str) else row["run_log"]
@@ -73,7 +80,6 @@ else:
             except Exception:
                 st.text(row["run_log"])
 
-            # LLM decisions
             st.markdown("**LLM Decisions**")
             try:
                 decisions = json.loads(row["llm_decisions"]) if isinstance(row["llm_decisions"], str) else row["llm_decisions"]
@@ -87,7 +93,6 @@ else:
             except Exception:
                 st.text(row["llm_decisions"])
 
-            # Params
             st.markdown("**Parameters**")
             try:
                 params = json.loads(row["params"]) if isinstance(row["params"], str) else row["params"]
